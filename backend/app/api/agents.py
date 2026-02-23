@@ -3,22 +3,24 @@ from sqlalchemy.orm import Session
 from app import crud, schemas
 from database import get_db
 from typing import Optional
+from azure_agents.service import get_agent_service
+from datetime import datetime
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
 
 @router.post("/ask", response_model=schemas.AgentResponse)
-def ask_agent(request: schemas.AgentRequest, db: Session = Depends(get_db)):
+async def ask_agent(request: schemas.AgentRequest, db: Session = Depends(get_db)):
     """
     Main entry point for patient queries.
     
     Aurora (Orchestrator) will:
-    1. Analyze user_input using Azure OpenAI
+    1. Analyze user_input using Azure AI
     2. Detect intent and emotion
     3. Route to appropriate agent (Harbor, Roots, Solace, Legacy, etc.)
     4. Get response from agent
     5. Apply Guardrail Engine checks
-    6. Return response
+    6. Return response and log interaction
     
     If agent_type is not specified, Aurora will automatically route.
     """
@@ -28,18 +30,82 @@ def ask_agent(request: schemas.AgentRequest, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    # TODO: Implement Aurora Agent orchestration logic
-    # For now, return a placeholder response
-    response = schemas.AgentResponse(
-        agent_type="aurora",
-        response="Please implement Aurora agent orchestration",
-        intent="unknown",
-        emotion_score=0.5,
-        emotion_type="neutral",
-        alert_triggered=False
-    )
+    # Get agent service
+    agent_service = get_agent_service()
     
-    return response
+    try:
+        # Process message through Azure agents
+        result = await agent_service.process_user_message(
+            user_id=request.user_id,
+            user_input=request.user_input,
+            db=db,
+            agent_type=request.agent_type
+        )
+        
+        # Log the interaction to database
+        interaction_data = schemas.AgentInteractionCreate(
+            user_id=request.user_id,
+            agent_type=result['agent_type'],
+            user_input=request.user_input,
+            agent_response=result['response'],
+            intent=result.get('intent'),
+            emotion_score=result.get('emotion_score'),
+            emotion_type=result.get('emotion_type'),
+            is_routine=result.get('intent') in ['orientation', 'family_recognition']  # Common repeated questions
+        )
+        crud.create_agent_interaction(db=db, interaction=interaction_data)
+        
+        # Create caregiver alert if triggered
+        if result.get('alert_triggered') and result.get('alert_message'):
+            # Find caregiver for this patient
+            # For now, we'll need a caregiver relationship - simplified for demo
+            alert_data = schemas.CaregiverAlertCreate(
+                user_id=request.user_id,
+                caregiver_id=1,  # TODO: Get actual caregiver from user relationships
+                alert_type='emotional_distress',
+                message=result['alert_message'],
+                trigger_agent=result['agent_type']
+            )
+            crud.create_caregiver_alert(db=db, alert=alert_data)
+        
+        # Return response
+        response = schemas.AgentResponse(
+            agent_type=result['agent_type'],
+            response=result['response'],
+            intent=result.get('intent'),
+            emotion_score=result.get('emotion_score'),
+            emotion_type=result.get('emotion_type'),
+            alert_triggered=result.get('alert_triggered', False),
+            alert_message=result.get('alert_message')
+        )
+        
+        return response
+        
+    except Exception as e:
+        # Log error and return graceful fallback
+        print(f"Error processing agent request: {str(e)}")
+        
+        # Still log the interaction attempt
+        interaction_data = schemas.AgentInteractionCreate(
+            user_id=request.user_id,
+            agent_type='aurora',
+            user_input=request.user_input,
+            agent_response="I'm here to help. Could you please tell me more?",
+            intent='error_recovery',
+            emotion_score=0.5,
+            emotion_type='neutral',
+            is_routine=False
+        )
+        crud.create_agent_interaction(db=db, interaction=interaction_data)
+        
+        return schemas.AgentResponse(
+            agent_type='aurora',
+            response="I'm here to help. Could you please tell me more about how you're feeling?",
+            intent='error_recovery',
+            emotion_score=0.5,
+            emotion_type='neutral',
+            alert_triggered=False
+        )
 
 
 @router.get("/harbor/location/{user_id}")
