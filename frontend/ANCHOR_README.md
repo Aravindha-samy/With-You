@@ -1,4 +1,4 @@
-# Anchor - Digital Companion for Alzheimer's Patients
+# With You - Digital Companion for Alzheimer's Patients
 
 A warm, accessible, and emotionally intelligent digital companion designed to help Alzheimer's patients maintain daily orientation, reduce anxiety, and stay connected with their loved ones.
 
