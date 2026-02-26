@@ -4,6 +4,7 @@ from app import crud, schemas
 from database import get_db
 from typing import Optional
 from app.agents import aurora, harbor, roots, solace, legacy, echo, guardian
+from app.copilot_client import generate_response_sync, get_agent_system_prompt
 import uuid
 
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -90,8 +91,14 @@ def ask_agent(request: schemas.AgentRequest, db: Session = Depends(get_db)):
         response_text = legacy_response["message"]
 
     else:
-        # Default to Solace for safety
-        response_text = "I'm here with you. How can I help?"
+        # Default to Copilot-generated response for safety
+        default_response = generate_response_sync(
+            prompt=f"The patient says: \"{request.user_input}\"\n\nProvide a warm, supportive response that helps them feel safe and heard.",
+            system_prompt=get_agent_system_prompt("solace"),
+            max_tokens=80,
+            temperature=0.6
+        )
+        response_text = default_response if default_response else "I'm here with you. How can I help?"
 
     # Log interaction via Echo
     echo.log_interaction(
@@ -135,12 +142,21 @@ def get_location(user_id: int, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # TODO: Implement Harbor with location database
+    # Generate personalized message using Copilot
+    message = generate_response_sync(
+        prompt="The patient is asking where they are. They are at home in Chennai (moved in 2018). Generate a warm, reassuring response about their location.",
+        system_prompt=get_agent_system_prompt("harbor"),
+        max_tokens=60,
+        temperature=0.6
+    )
+    if not message:
+        message = "You're at home in Chennai. You moved here in 2018. You're safe."
+
     return {
         "location": "Home",
         "move_year": 2018,
         "city": "Chennai",
-        "message": "You're at home in Chennai. You moved here in 2018. You're safe."
+        "message": message
     }
 
 
@@ -155,10 +171,19 @@ def get_scheduled_visits(user_id: int, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # TODO: Implement Harbor with visit scheduling
+    # Generate message using Copilot
+    message = generate_response_sync(
+        prompt="The patient is asking about scheduled visits for today, but there are no visits scheduled. Generate a warm, reassuring response.",
+        system_prompt=get_agent_system_prompt("harbor"),
+        max_tokens=60,
+        temperature=0.6
+    )
+    if not message:
+        message = "No visits scheduled for today, but your family is always thinking of you."
+
     return {
         "visits": [],
-        "message": "No visits scheduled for today"
+        "message": message
     }
 
 
@@ -194,14 +219,32 @@ def activate_calm_mode(user_id: int, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # TODO: Integrate with Calm Mode UI component
+    # Generate calming message using Copilot
+    calm_message = generate_response_sync(
+        prompt="The patient needs calm mode activated. Generate a soothing, reassuring message to accompany calming music and photos.",
+        system_prompt=get_agent_system_prompt("solace"),
+        max_tokens=80,
+        temperature=0.5
+    )
+    if not calm_message:
+        calm_message = "You're safe. Take deep breaths. I'm here with you."
+
+    status_message = generate_response_sync(
+        prompt="Calm mode has been activated for the patient. Generate a brief confirmation message.",
+        system_prompt=get_agent_system_prompt("solace"),
+        max_tokens=40,
+        temperature=0.5
+    )
+    if not status_message:
+        status_message = "Calm mode activated. Playing soothing content..."
+
     return {
         "status": "calm_mode_activated",
-        "message": "Calm mode activated. Playing soothing content...",
+        "message": status_message,
         "content": {
             "music": "gentle_piano.mp3",
             "photos": [],  # Should be from memory cards
-            "reassurance": "You're safe. Take deep breaths. I'm here with you."
+            "reassurance": calm_message
         }
     }
 

@@ -22,3 +22,8 @@ CORS_ORIGINS = os.getenv(
 APP_TITLE = "With You API"
 APP_DESCRIPTION = "Identity-First AI Architecture - When memory fades, presence remains. API for cognitive mesh agents: Aurora, Harbor, Roots, Solace, Legacy, Echo, and Guardian."
 APP_VERSION = "2.0.0"
+
+# GitHub Models / Copilot Configuration
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+MODEL_ENDPOINT = os.getenv("MODEL_ENDPOINT", "https://models.github.ai/inference/")
+MODEL_DEPLOYMENT_NAME = os.getenv("MODEL_DEPLOYMENT_NAME", "gpt-4o-mini")
