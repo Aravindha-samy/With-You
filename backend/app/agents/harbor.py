@@ -7,6 +7,7 @@ Goal: Reduce panic through familiarity.
 
 from typing import Dict, Any
 from datetime import datetime
+from app.copilot_client import generate_response_sync, get_agent_system_prompt
 
 
 class Harbor:
@@ -21,6 +22,8 @@ class Harbor:
 
     def __init__(self):
         self.tone = "warm, steady, low complexity, reassuring"
+        self.system_prompt = get_agent_system_prompt("harbor")
+        self.fallback_message = "You're safe. Everything is okay. I'm here with you."
 
     def respond(
         self,
@@ -30,44 +33,43 @@ class Harbor:
         anxiety_score: float = 0.0
     ) -> Dict[str, Any]:
         """
-        Generate orientation response
-
-        Returns:
-        {
-            "message": "User-facing response",
-            "reassurance_level": "low|medium|high",
-            "followup_suggestion": "none|call_family|play_memory"
-        }
+        Generate orientation response using Copilot model
         """
-
-        current_time = datetime.now()
-        day_name = current_time.strftime("%A")
-        time_of_day = self._get_time_of_day(current_time.hour)
-
-        # Base orientation message
+        # Build context-aware prompt
         location = user_data.get("location", "home")
-        message = f"You're at {location}. You're safe. It's {day_name} {time_of_day}."
+        current_time = datetime.now()
+        time_of_day = self._get_time_of_day(current_time.hour)
+        
+        context_prompt = f"""The patient is asking: "{query}"
 
-        # Add reinforcement if high repetition
-        reassurance_level = "low"
-        if repetition_counter > 3:
-            message += " Everything is okay."
-            reassurance_level = "medium"
+Context:
+- Location: {location}
+- Time: {time_of_day}, {current_time.strftime('%A, %B %d, %Y')}
+- Repetition count: {repetition_counter} (if high, be extra patient and reassuring)
+- Anxiety level: {anxiety_score:.1f}/1.0 (if high, prioritize calming)
 
-        # Add grounding if high anxiety
-        if anxiety_score > 0.8:
-            message += " Take a deep breath. You're in a familiar place."
-            reassurance_level = "high"
+Provide a warm, reassuring response about their orientation. Keep it to 2-3 short sentences."""
 
-        # Determine follow-up
-        followup = "none"
-        if repetition_counter > 5 or anxiety_score > 0.85:
-            followup = "call_family"
+        # Generate response using Copilot model
+        message = generate_response_sync(
+            prompt=context_prompt,
+            system_prompt=self.system_prompt,
+            max_tokens=100,
+            temperature=0.6
+        )
+        
+        # Fallback if model fails
+        if not message:
+            message = self.fallback_message
+        
+        # Determine reassurance and followup based on anxiety
+        reassurance_level = "high" if anxiety_score > 0.7 else "medium" if anxiety_score > 0.4 else "low"
+        followup_suggestion = "call_family" if anxiety_score > 0.85 else "none"
 
         return {
             "message": message,
             "reassurance_level": reassurance_level,
-            "followup_suggestion": followup
+            "followup_suggestion": followup_suggestion
         }
 
     def get_scheduled_events(self, events: list) -> Dict[str, Any]:

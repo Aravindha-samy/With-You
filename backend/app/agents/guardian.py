@@ -6,6 +6,7 @@ Generates summaries, trends, and alerts for caregivers.
 
 from typing import Dict, Any, List
 from datetime import datetime, timedelta
+from app.copilot_client import generate_response_sync, get_agent_system_prompt
 
 
 class Guardian:
@@ -20,7 +21,7 @@ class Guardian:
     """
 
     def __init__(self):
-        pass
+        self.system_prompt = get_agent_system_prompt("guardian")
 
     def generate_daily_summary(
         self,
@@ -58,8 +59,18 @@ class Guardian:
         ).all()
 
         if not interactions:
+            # Use Copilot to generate a helpful message when no data
+            message = generate_response_sync(
+                prompt="There are no patient interactions recorded for today. Generate a brief, helpful message for the caregiver.",
+                system_prompt=self.system_prompt,
+                max_tokens=60,
+                temperature=0.5
+            )
+            if not message:
+                message = "No interactions recorded today."
+            
             return {
-                "summary": "No interactions recorded today.",
+                "summary": message,
                 "emotional_trend": "stable",
                 "orientation_trend": "stable",
                 "alert_level": "none"
@@ -104,7 +115,7 @@ class Guardian:
         }
 
     def generate_weekly_report(self, db, user_id: int) -> Dict[str, Any]:
-        """Generate weekly cognitive report"""
+        """Generate weekly cognitive report using Copilot model"""
         from app.model.cognitive_metric import CognitiveMetric
 
         # Get latest metric
@@ -113,22 +124,50 @@ class Guardian:
         ).order_by(CognitiveMetric.created_at.desc()).first()
 
         if not metric:
+            # Use Copilot to generate helpful message
+            message = generate_response_sync(
+                prompt="There is no cognitive data available for the weekly report yet. Generate a brief, helpful message for the caregiver explaining this.",
+                system_prompt=self.system_prompt,
+                max_tokens=80,
+                temperature=0.5
+            )
+            if not message:
+                message = "No data available for weekly report. Continue monitoring for more insights."
+            
             return {
-                "summary": "No data available for weekly report.",
+                "summary": message,
                 "emotional_trend": "stable",
                 "orientation_trend": "stable",
                 "alert_level": "none"
             }
 
-        summary = f"CSI Score: {metric.csi_score:.2f}. "
-        summary += f"Orientation frequency: {metric.orientation_frequency}. "
-        summary += f"Average anxiety: {metric.anxiety_average:.2f}. "
+        # Build context for Copilot analysis
+        context_prompt = f"""Generate a weekly cognitive health summary for a caregiver based on this data:
+
+- CSI Score: {metric.csi_score:.2f} (1.0 = stable, lower = more challenges)
+- Orientation question frequency: {metric.orientation_frequency} times this week
+- Average anxiety level: {metric.anxiety_average:.2f} (0.0 = calm, 1.0 = highly anxious)
+- Cognitive drift: {metric.cognitive_drift}
+
+Provide a brief, professional summary (2-3 sentences) with actionable insights for the caregiver."""
+
+        summary = generate_response_sync(
+            prompt=context_prompt,
+            system_prompt=self.system_prompt,
+            max_tokens=150,
+            temperature=0.5
+        )
+        
+        if not summary:
+            summary = f"CSI Score: {metric.csi_score:.2f}. "
+            summary += f"Orientation frequency: {metric.orientation_frequency}. "
+            summary += f"Average anxiety: {metric.anxiety_average:.2f}. "
 
         return {
             "summary": summary,
-            "emotional_trend": metric.emotional_trend,
+            "emotional_trend": metric.emotional_trend if hasattr(metric, 'emotional_trend') else "stable",
             "orientation_trend": metric.cognitive_drift,
-            "alert_level": metric.escalation_flag
+            "alert_level": metric.escalation_flag if hasattr(metric, 'escalation_flag') else "none"
         }
 
     def check_intervention_needed(self, db, user_id: int) -> bool:
@@ -153,6 +192,36 @@ class Guardian:
         ).scalar() or 0
 
         return high_anxiety_count >= 3 or high_repetition >= 5
+
+    def generate_caregiver_summary(self, patient_data: str) -> Dict[str, Any]:
+        """
+        Generate caregiver summary using Copilot model
+        """
+        context_prompt = f"""Generate a comprehensive caregiver summary based on this patient data:
+
+{patient_data}
+
+Provide:
+1. Overview of patient's current state
+2. Key observations and patterns
+3. Recommendations for the caregiver
+4. Any areas requiring attention
+
+Keep it professional, compassionate, and actionable."""
+
+        summary = generate_response_sync(
+            prompt=context_prompt,
+            system_prompt=self.system_prompt,
+            max_tokens=200,
+            temperature=0.5
+        )
+        
+        if not summary:
+            summary = "Unable to generate summary at this time. Please review patient data manually."
+
+        return {
+            "summary": summary
+        }
 
 
 # Singleton instance

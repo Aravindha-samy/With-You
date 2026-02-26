@@ -6,6 +6,7 @@ Persistent memory intelligence for tracking patterns and computing metrics.
 
 from typing import Dict, Any, List
 from datetime import datetime, timedelta
+from app.copilot_client import generate_response_sync, get_agent_system_prompt
 
 
 class Echo:
@@ -20,7 +21,7 @@ class Echo:
     """
 
     def __init__(self):
-        pass
+        self.system_prompt = get_agent_system_prompt("echo")
 
     def log_interaction(
         self,
@@ -186,6 +187,36 @@ class Echo:
         db.commit()
 
         return drift_flag
+
+    def analyze_memory_pattern(self, memory_log: str) -> Dict[str, Any]:
+        """
+        Analyze memory patterns using Copilot model
+        """
+        context_prompt = f"""Analyze the following memory/interaction log and identify patterns:
+
+{memory_log}
+
+Identify:
+1. Repetition patterns (same questions asked multiple times)
+2. Emotional trends (increasing/decreasing anxiety)
+3. Cognitive patterns (orientation confusion, identity questions)
+4. Any concerning changes
+
+Provide a brief, objective analysis."""
+
+        analysis = generate_response_sync(
+            prompt=context_prompt,
+            system_prompt=self.system_prompt,
+            max_tokens=200,
+            temperature=0.4
+        )
+        
+        if not analysis:
+            analysis = "Unable to analyze patterns at this time."
+
+        return {
+            "analysis": analysis
+        }
 
 
 # Singleton instance
