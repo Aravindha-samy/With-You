@@ -183,6 +183,7 @@ class AgentRequest(BaseModel):
     user_input: str
     agent_type: Optional[str] = None  # If None, Aurora will route
     voice_enabled: Optional[bool] = False
+    session_id: Optional[str] = None
 
 
 class AgentResponse(BaseModel):

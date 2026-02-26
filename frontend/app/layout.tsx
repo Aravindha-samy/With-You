@@ -8,8 +8,8 @@ const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: 'Anchor - Daily Orientation Companion',
-  description: 'A warm, accessible digital companion for Alzheimer\'s patients. Provides daily orientation, family connections, and emotional reassurance.',
+  title: 'With You - When memory fades, presence remains',
+  description: 'An identity-first AI companion for Alzheimer\'s patients. Protects identity, relationships, emotional safety, and personal story continuity through specialized cognitive agents.',
   generator: 'v0.app',
   viewport: {
     width: 'device-width',

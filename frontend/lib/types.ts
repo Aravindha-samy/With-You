@@ -99,13 +99,24 @@ export interface CaregiverAlert {
 }
 
 // Guardian Dashboard Types
+export interface GuardianSummary {
+  summary: string;
+  emotional_trend: 'stable' | 'declining' | 'improving';
+  orientation_trend: 'stable' | 'declining' | 'improving';
+  alert_level: 'none' | 'monitor' | 'intervene';
+}
+
 export interface GuardianDashboard {
   user_id: number;
-  total_interactions: number;
-  anxiety_instances: number;
-  routine_questions: number;
-  insights: CognitiveInsight[];
-  recent_interactions: AgentInteraction[];
+  daily_summary: GuardianSummary;
+  weekly_report: GuardianSummary;
+  intervention_needed: boolean;
+  // Legacy fields for backward compatibility
+  total_interactions?: number;
+  anxiety_instances?: number;
+  routine_questions?: number;
+  insights?: CognitiveInsight[];
+  recent_interactions?: AgentInteraction[];
 }
 
 // Location Info Types

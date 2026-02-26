@@ -1,7 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import Base, engine
-from app.model import User, MoodCheckIn, MemoryCard, EmergencyContact, AgentInteraction, CognitiveInsight, CaregiverAlert
+from app.model import (
+    User, MoodCheckIn, MemoryCard, EmergencyContact, AgentInteraction,
+    CognitiveInsight, CaregiverAlert, Relationship, Event, Interaction, CognitiveMetric
+)
 from app.api import users, mood_checkins, memory_cards, emergency_contacts, agent_interactions, cognitive_insights, caregiver_alerts, agents
 from settings import APP_TITLE, APP_DESCRIPTION, APP_VERSION
 
@@ -18,7 +21,7 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

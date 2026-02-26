@@ -15,9 +15,10 @@ API_PORT = int(os.getenv("API_PORT", 8000))
 API_RELOAD = os.getenv("API_RELOAD", "True").lower() == "true"
 
 # CORS Configuration
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "['http://localhost:3000', 'http://localhost:3001']")
+CORS_ORIGINS = os.getenv(
+    "CORS_ORIGINS", "['http://localhost:3000', 'http://localhost:3001']")
 
 # Application Title and Description
-APP_TITLE = "WithYou API"
-APP_DESCRIPTION = "API for WithYou - Patient Care and Memory Management System"
-APP_VERSION = "1.0.0"
+APP_TITLE = "With You API"
+APP_DESCRIPTION = "Identity-First AI Architecture - When memory fades, presence remains. API for cognitive mesh agents: Aurora, Harbor, Roots, Solace, Legacy, Echo, and Guardian."
+APP_VERSION = "2.0.0"

@@ -3,6 +3,8 @@ from sqlalchemy.orm import Session
 from app import crud, schemas
 from database import get_db
 from typing import Optional
+from app.agents import aurora, harbor, roots, solace, legacy, echo, guardian
+import uuid
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -10,35 +12,112 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 @router.post("/ask", response_model=schemas.AgentResponse)
 def ask_agent(request: schemas.AgentRequest, db: Session = Depends(get_db)):
     """
-    Main entry point for patient queries.
-    
+    Main entry point for patient queries - Aurora Orchestrator
+
     Aurora (Orchestrator) will:
-    1. Analyze user_input using Azure OpenAI
+    1. Analyze user_input
     2. Detect intent and emotion
     3. Route to appropriate agent (Harbor, Roots, Solace, Legacy, etc.)
     4. Get response from agent
-    5. Apply Guardrail Engine checks
+    5. Log interaction via Echo
     6. Return response
-    
-    If agent_type is not specified, Aurora will automatically route.
     """
-    
+
     # Verify user exists
     user = crud.get_user(db, user_id=request.user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
-    # TODO: Implement Aurora Agent orchestration logic
-    # For now, return a placeholder response
-    response = schemas.AgentResponse(
-        agent_type="aurora",
-        response="Please implement Aurora agent orchestration",
-        intent="unknown",
-        emotion_score=0.5,
-        emotion_type="neutral",
-        alert_triggered=False
+
+    # Generate session ID if not provided
+    session_id = request.session_id or str(uuid.uuid4())
+
+    # Track repetition
+    repetition_count = echo.track_repetition(
+        db, request.user_id, request.user_input)
+
+    # Aurora analyzes the input
+    analysis = aurora.analyze_input(
+        user_input=request.user_input,
+        user_id=request.user_id,
+        session_history=[],
+        repetition_counter=repetition_count,
+        csi=1.0
     )
-    
+
+    # Route to appropriate agent
+    target_agent = analysis["target_agent"]
+    response_text = ""
+    alert_triggered = False
+
+    if target_agent == "harbor":
+        # Get user data
+        user_data = {"location": "home"}  # TODO: Get from user profile
+        harbor_response = harbor.respond(
+            query=request.user_input,
+            user_data=user_data,
+            repetition_counter=repetition_count,
+            anxiety_score=analysis["emotional_score"]
+        )
+        response_text = harbor_response["message"]
+        alert_triggered = harbor_response["followup_suggestion"] == "call_family"
+
+    elif target_agent == "roots":
+        # Get relationship data if asking about someone
+        # TODO: Parse person name from query and fetch from DB
+        roots_response = roots.respond(
+            query=request.user_input,
+            person_node=None,
+            anxiety_high=analysis["emotional_score"] > 0.8
+        )
+        response_text = roots_response["message"]
+        alert_triggered = roots_response["suggest_call"]
+
+    elif target_agent == "solace":
+        solace_response = solace.respond(
+            query=request.user_input,
+            anxiety_score=analysis["emotional_score"],
+            repetition_count=repetition_count
+        )
+        response_text = solace_response["message"]
+        alert_triggered = solace_response["caregiver_alert"]
+
+    elif target_agent == "legacy":
+        # TODO: Get life stories from memory cards
+        legacy_response = legacy.respond(
+            query=request.user_input,
+            life_stories=[]
+        )
+        response_text = legacy_response["message"]
+
+    else:
+        # Default to Solace for safety
+        response_text = "I'm here with you. How can I help?"
+
+    # Log interaction via Echo
+    echo.log_interaction(
+        db=db,
+        user_id=request.user_id,
+        question=request.user_input,
+        response=response_text,
+        agent_type=target_agent,
+        intent=analysis["intent"],
+        emotion_score=analysis["emotional_score"],
+        session_id=session_id
+    )
+
+    # Check if caregiver intervention needed
+    if guardian.check_intervention_needed(db, request.user_id):
+        alert_triggered = True
+
+    response = schemas.AgentResponse(
+        agent_type=target_agent,
+        response=response_text,
+        intent=analysis["intent"],
+        emotion_score=analysis["emotional_score"],
+        emotion_type="anxious" if analysis["emotional_score"] > 0.7 else "calm",
+        alert_triggered=alert_triggered
+    )
+
     return response
 
 
@@ -46,7 +125,7 @@ def ask_agent(request: schemas.AgentRequest, db: Session = Depends(get_db)):
 def get_location(user_id: int, db: Session = Depends(get_db)):
     """
     Harbor Agent: Get orientation information (Where am I?)
-    
+
     Returns:
     - Location (home, hospital, etc.)
     - Move year
@@ -55,7 +134,7 @@ def get_location(user_id: int, db: Session = Depends(get_db)):
     user = crud.get_user(db, user_id=user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     # TODO: Implement Harbor with location database
     return {
         "location": "Home",
@@ -69,13 +148,13 @@ def get_location(user_id: int, db: Session = Depends(get_db)):
 def get_scheduled_visits(user_id: int, db: Session = Depends(get_db)):
     """
     Harbor Agent: Get scheduled visits (Who is visiting today?)
-    
+
     Returns list of scheduled family visits with times
     """
     user = crud.get_user(db, user_id=user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     # TODO: Implement Harbor with visit scheduling
     return {
         "visits": [],
@@ -87,16 +166,16 @@ def get_scheduled_visits(user_id: int, db: Session = Depends(get_db)):
 def get_family_info(user_id: int, db: Session = Depends(get_db)):
     """
     Roots Agent: Get family member information (Who is this?)
-    
+
     Returns list of family members with photos and descriptions
     """
     user = crud.get_user(db, user_id=user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     # Get emergency contacts as family members
     family = crud.get_emergency_contacts(db, user_id=user_id)
-    
+
     return {
         "family_members": family,
         "total": len(family)
@@ -107,14 +186,14 @@ def get_family_info(user_id: int, db: Session = Depends(get_db)):
 def activate_calm_mode(user_id: int, db: Session = Depends(get_db)):
     """
     Solace Agent: Activate calm mode
-    
+
     Triggers calm music, photo slideshow, reassurance messages
     Used when patient is anxious or disoriented
     """
     user = crud.get_user(db, user_id=user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     # TODO: Integrate with Calm Mode UI component
     return {
         "status": "calm_mode_activated",
@@ -131,16 +210,17 @@ def activate_calm_mode(user_id: int, db: Session = Depends(get_db)):
 def get_personal_stories(user_id: int, skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
     """
     Legacy Agent: Get personal stories and memories
-    
+
     Returns user's life narrative, work history, personal stories
     """
     user = crud.get_user(db, user_id=user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     # Get memory cards as stories
-    memories = crud.get_memory_cards(db=db, user_id=user_id, skip=skip, limit=limit)
-    
+    memories = crud.get_memory_cards(
+        db=db, user_id=user_id, skip=skip, limit=limit)
+
     return {
         "stories": memories,
         "total": len(memories)
@@ -151,33 +231,31 @@ def get_personal_stories(user_id: int, skip: int = 0, limit: int = 10, db: Sessi
 def get_guardian_dashboard(user_id: int, db: Session = Depends(get_db)):
     """
     Guardian Agent: Get caregiver dashboard insights
-    
+
     Returns:
-    - Anxiety trends
+    - Daily summary
+    - Emotional trends
     - Orientation trends
-    - Repetition patterns
-    - Emotional averages
     - Alerts for caregiver
     """
     user = crud.get_user(db, user_id=user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
-    # Get recent interactions for analysis
-    interactions = crud.get_agent_interactions(db=db, user_id=user_id, limit=100)
-    insights = crud.get_cognitive_insights(db=db, user_id=user_id, limit=50)
-    
-    # Calculate some basic metrics
-    anxiety_count = sum(1 for i in interactions if i.emotion_type == "anxious")
-    routine_count = sum(1 for i in interactions if i.is_routine)
-    
+
+    # Generate daily summary using Guardian agent
+    daily_summary = guardian.generate_daily_summary(db, user_id)
+
+    # Generate weekly report
+    weekly_report = guardian.generate_weekly_report(db, user_id)
+
+    # Check intervention needed
+    intervention_needed = guardian.check_intervention_needed(db, user_id)
+
     return {
         "user_id": user_id,
-        "total_interactions": len(interactions),
-        "anxiety_instances": anxiety_count,
-        "routine_questions": routine_count,
-        "insights": insights,
-        "recent_interactions": interactions[-10:] if interactions else []
+        "daily_summary": daily_summary,
+        "weekly_report": weekly_report,
+        "intervention_needed": intervention_needed
     }
 
 
@@ -185,32 +263,21 @@ def get_guardian_dashboard(user_id: int, db: Session = Depends(get_db)):
 def get_memory_patterns(user_id: int, db: Session = Depends(get_db)):
     """
     Echo Agent: Get memory and behavior patterns
-    
+
     Returns:
     - Repetition frequency
     - Anxiety patterns
     - Emotional trends
-    - Question patterns
     """
     user = crud.get_user(db, user_id=user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
-    interactions = crud.get_agent_interactions(db=db, user_id=user_id, limit=100)
-    
-    # Calculate patterns
-    intent_counts = {}
-    emotion_counts = {}
-    
-    for interaction in interactions:
-        intent_counts[interaction.intent] = intent_counts.get(interaction.intent, 0) + 1
-        if interaction.emotion_type:
-            emotion_counts[interaction.emotion_type] = emotion_counts.get(interaction.emotion_type, 0) + 1
-    
+
+    # Get emotional variance
+    emotional_variance = echo.compute_emotional_variance(db, user_id, days=7)
+
     return {
         "user_id": user_id,
-        "total_interactions": len(interactions),
-        "intent_patterns": intent_counts,
-        "emotion_patterns": emotion_counts,
-        "repetition_index": sum(1 for i in interactions if i.is_routine) / len(interactions) if interactions else 0
+        "emotional_variance": emotional_variance,
+        "status": "analysis_complete"
     }
